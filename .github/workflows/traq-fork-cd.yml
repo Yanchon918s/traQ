@@ -44,11 +44,6 @@ jobs:
             TRAQ_VERSION=master-SNAPSHOT
             TRAQ_REVISION=${{ github.sha }}
           tags: ghcr.io/yanchon918s/traq:${{ github.sha }}
-      - name: Make the deployment image public
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh api --method PATCH /user/packages/container/traq/visibility -f visibility=public
-
   deploy:
     name: Deploy fork image to traQ production
     needs: build-image
@@ -56,6 +51,7 @@ jobs:
     environment: traq-production
     permissions:
       contents: read
+      packages: read
     steps:
       - name: Verify local deployment source
         shell: pwsh
@@ -78,6 +74,8 @@ jobs:
         shell: pwsh
         env:
           TRAQ_SSH_HOST_KEY_FINGERPRINT: ${{ vars.TRAQ_SSH_HOST_KEY_FINGERPRINT }}
+          LAB_TRAQ_GHCR_USERNAME: ${{ github.actor }}
+          LAB_TRAQ_GHCR_TOKEN: ${{ github.token }}
         run: |
           if ([string]::IsNullOrWhiteSpace($env:TRAQ_SSH_HOST_KEY_FINGERPRINT)) {
             throw 'Repository variable TRAQ_SSH_HOST_KEY_FINGERPRINT is required.'
@@ -95,6 +93,8 @@ jobs:
         shell: pwsh
         env:
           TRAQ_SSH_HOST_KEY_FINGERPRINT: ${{ vars.TRAQ_SSH_HOST_KEY_FINGERPRINT }}
+          LAB_TRAQ_GHCR_USERNAME: ${{ github.actor }}
+          LAB_TRAQ_GHCR_TOKEN: ${{ github.token }}
         run: |
           & 'C:\repos\local-lab-knowledge\scripts\Test-Traq.ps1' `
             -HostAddress 192.168.1.16 `
