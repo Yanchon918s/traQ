@@ -1,0 +1,103 @@
+name: traQ fork CD
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: traq-production
+  cancel-in-progress: false
+
+jobs:
+  build-image:
+    name: Build and publish fork image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and publish
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            TRAQ_VERSION=master-SNAPSHOT
+            TRAQ_REVISION=${{ github.sha }}
+          tags: ghcr.io/yanchon918s/traq:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Make the deployment image public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api --method PATCH /user/packages/container/traq/visibility -f visibility=public
+
+  deploy:
+    name: Deploy fork image to traQ production
+    needs: build-image
+    runs-on: [self-hosted, windows, traq-deploy]
+    environment: traq-production
+    permissions:
+      contents: read
+    steps:
+      - name: Verify local deployment source
+        shell: pwsh
+        run: |
+          $root = 'C:\repos\local-lab-knowledge'
+          if (-not (Test-Path -LiteralPath (Join-Path $root 'scripts\Deploy-Traq.ps1'))) {
+            throw "Local deployment source was not found: $root"
+          }
+          foreach ($relative in @(
+            'infra\traq\compose.yaml',
+            'infra\traq\frontend\account-issuer\index.html',
+            'scripts\deploy_traq.py',
+            'scripts\Test-Traq.ps1'
+          )) {
+            if (-not (Test-Path -LiteralPath (Join-Path $root $relative))) {
+              throw "Deployment file was not found: $relative"
+            }
+          }
+      - name: Deploy
+        shell: pwsh
+        env:
+          TRAQ_SSH_HOST_KEY_FINGERPRINT: ${{ vars.TRAQ_SSH_HOST_KEY_FINGERPRINT }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TRAQ_SSH_HOST_KEY_FINGERPRINT)) {
+            throw 'Repository variable TRAQ_SSH_HOST_KEY_FINGERPRINT is required.'
+          }
+          $root = 'C:\repos\local-lab-knowledge'
+          & "$root\scripts\Deploy-Traq.ps1" `
+            -RepositoryRoot $root `
+            -HostAddress 192.168.1.16 `
+            -SshHostKeyFingerprint $env:TRAQ_SSH_HOST_KEY_FINGERPRINT `
+            -CredentialSource Plaintext `
+            -QallProvider LiveKit `
+            -TraqImage "ghcr.io/yanchon918s/traq@${{ needs.build-image.outputs.image-digest }}" `
+            -Apply
+      - name: Verify production
+        shell: pwsh
+        env:
+          TRAQ_SSH_HOST_KEY_FINGERPRINT: ${{ vars.TRAQ_SSH_HOST_KEY_FINGERPRINT }}
+        run: |
+          & 'C:\repos\local-lab-knowledge\scripts\Test-Traq.ps1' `
+            -HostAddress 192.168.1.16 `
+            -SshHostKeyFingerprint $env:TRAQ_SSH_HOST_KEY_FINGERPRINT
