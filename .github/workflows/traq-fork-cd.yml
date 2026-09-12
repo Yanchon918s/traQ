@@ -44,8 +44,6 @@ jobs:
             TRAQ_VERSION=master-SNAPSHOT
             TRAQ_REVISION=${{ github.sha }}
           tags: ghcr.io/yanchon918s/traq:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
       - name: Make the deployment image public
         env:
           GH_TOKEN: ${{ github.token }}
